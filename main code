@@ -148,60 +148,87 @@ void drawSplashScreen() {
   displayMeter.display();
 }
 
-void drawSMeter() {
+int meterNeedleX(float normalized, const int *positions, int count) {
+  if (count <= 1) return positions[0];
+  if (normalized <= 0.0f) return positions[0];
+  if (normalized >= 1.0f) return positions[count - 1];
+  float scaled = normalized * (count - 1);
+  int idx = (int)scaled;
+  float frac = scaled - idx;
+  return (int)(positions[idx] + (positions[idx + 1] - positions[idx]) * frac);
+}
+
+void drawClassicMeterFace(const char* title, const char* valueText, const char* const* labels, const int* labelX, int labelCount, float normalized) {
   displayMeter.clearDisplay();
-  int val = analogRead(AUDIO_IN_PIN);
-  int level = map(val, 0, 4095, 0, 7); // 0-7 segments
-  const char* labels[8] = {"S1", "S3", "S5", "S7", "S9","+20","+40","+60"};
+  displayMeter.drawRect(0, 0, METER_W, METER_H, SSD1306_WHITE);
   displayMeter.setTextSize(1);
-  displayMeter.setCursor(0, 0);
-  displayMeter.print(digitalRead(PTT_DETECT_PIN) == LOW ? "PWR" : "S"); // PWR for TX
-  for (int i = 0; i < 8; i++) {
-    int x = 4 + i * 15;
-    displayMeter.drawLine(x, 8, x, 12, SSD1306_WHITE); // Ticks
-    displayMeter.setCursor(x - 3, 16);
-    displayMeter.print(labels[i]);
-    if (digitalRead(PTT_DETECT_PIN) == LOW) {
-      // TX power scale 0-10, map to 8 segments
-      int pwrLevel = map(val, 0, 4095, 0, 10);
-      if (i < (pwrLevel * 8 / 10)) displayMeter.fillRect(x - 6, 0, 12, 8, SSD1306_WHITE);
-    } else {
-      if (i <= level) displayMeter.fillRect(x - 6, 0, 12, 8, SSD1306_WHITE);
+
+  displayMeter.setCursor(4, 1);
+  displayMeter.print(title);
+
+  int16_t tbx, tby;
+  uint16_t tbw, tbh;
+  displayMeter.getTextBounds(valueText, 0, 0, &tbx, &tby, &tbw, &tbh);
+  displayMeter.setCursor(METER_W - tbw - 4, 1);
+  displayMeter.print(valueText);
+
+  const int scaleY = 12;
+  const int labelY = 21;
+  const int pivotX = 10;
+  const int pivotY = 28;
+  int needleX = meterNeedleX(normalized, labelX, labelCount);
+
+  displayMeter.drawLine(8, scaleY, METER_W - 8, scaleY, SSD1306_WHITE);
+  displayMeter.drawLine(pivotX, pivotY, needleX, scaleY - 1, SSD1306_WHITE);
+  displayMeter.drawCircle(pivotX, pivotY, 1, SSD1306_WHITE);
+
+  for (int i = 0; i < labelCount; i++) {
+    int x = labelX[i];
+    displayMeter.drawLine(x, scaleY - 2, x, scaleY + 2, SSD1306_WHITE);
+    if (i == 4) {
+      displayMeter.drawLine(x - 1, scaleY - 4, x - 1, scaleY + 4, SSD1306_WHITE);
+      displayMeter.drawLine(x + 1, scaleY - 4, x + 1, scaleY + 4, SSD1306_WHITE);
     }
+
+    int16_t bx, by;
+    uint16_t bw, bh;
+    displayMeter.getTextBounds(labels[i], 0, 0, &bx, &by, &bw, &bh);
+    displayMeter.setCursor(x - (bw / 2), labelY);
+    displayMeter.print(labels[i]);
   }
+
   displayMeter.display();
 }
 
+void drawSMeter() {
+  const char* labels[8] = {"S1", "S3", "S5", "S7", "S9", "+20", "+40", "+60"};
+  const int labelX[8] = {8, 23, 38, 53, 68, 84, 100, 116};
+  bool isTX = digitalRead(PTT_DETECT_PIN) == LOW;
+  float value = analogRead(AUDIO_IN_PIN) / 4095.0f;
+  value = sqrtf(value);
+  const char* valueText = isTX ? "TX PWR" : "RX";
+  drawClassicMeterFace("COBRA 148", valueText, labels, labelX, 8, value);
+}
+
 void drawVoltmeter() {
-  displayMeter.clearDisplay();
   float rawVolt = analogRead(VOLT_IN_PIN) * (3.3 / 4095.0);
   float voltage = rawVolt * voltCalibration + voltOffset;
   char voltStr[6];
   dtostrf(voltage, 4, 1, voltStr);
-  displayMeter.setTextSize(1);
-  displayMeter.setCursor(0, 0);
-  displayMeter.print("Voltmeter ");
-  displayMeter.print(voltStr);
-  // Centered bar like PDF
-  int barLen = map(voltage, 0, 15.0, 0, METER_W - 16);
-  displayMeter.fillRect(8, 20, barLen, 4, SSD1306_WHITE);
-  displayMeter.drawLine(8, 24, METER_W - 8, 24, SSD1306_WHITE); // Scale line
-  displayMeter.display();
+  const char* labels[6] = {"0", "3", "6", "9", "12", "15V"};
+  const int labelX[6] = {8, 28, 48, 68, 88, 116};
+  float normalized = constrain(voltage / 15.0f, 0.0f, 1.0f);
+  drawClassicMeterFace("COBRA 148", voltStr, labels, labelX, 6, normalized);
 }
 
 void drawSWR() {
-  displayMeter.clearDisplay();
-  // Placeholder; native radio SWR used, but digital tap possible
-  displayMeter.setTextSize(1);
-  displayMeter.setCursor(0, 0);
-  displayMeter.println("SWR: Use Radio");
-  displayMeter.setCursor(0, 16);
-  displayMeter.println("Meter (Native)");
-  // Bar for visual
-  int dummySWR = map(analogRead(AUDIO_IN_PIN), 0, 4095, 10, 40); // Dummy 1.0-4.0
-  int barLen = map(dummySWR, 10, 40, 0, METER_W - 16);
-  displayMeter.fillRect(8, 24, barLen, 4, SSD1306_WHITE);
-  displayMeter.display();
+  const char* labels[6] = {"1", "1.5", "2", "3", "4", "5"};
+  const int labelX[6] = {8, 28, 48, 68, 88, 116};
+  float dummySWR = map(analogRead(AUDIO_IN_PIN), 0, 4095, 10, 50) / 10.0f;
+  float normalized = constrain((dummySWR - 1.0f) / 4.0f, 0.0f, 1.0f);
+  char swrStr[6];
+  dtostrf(dummySWR, 3, 1, swrStr);
+  drawClassicMeterFace("COBRA 148", swrStr, labels, labelX, 6, normalized);
 }
 
 void setup() {
