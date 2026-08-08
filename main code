@@ -119,6 +119,7 @@ void calibrateVoltage() {
 
   if (fabsf(adc138 - adc12) < 0.001f) {
     displayMain.clearDisplay();
+    displayMain.setCursor(0, 0);
     displayMain.println("Cal error");
     displayMain.println("Retry volt cal");
     displayMain.display();
