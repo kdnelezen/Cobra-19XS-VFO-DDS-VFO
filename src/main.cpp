@@ -36,6 +36,15 @@ Encoder encoder(ENC_A, ENC_B);
 
 #define SAMPLES 256
 #define SAMPLERATE 8000
+constexpr unsigned long BOOT_SPLASH_MS = 2000;
+constexpr size_t EEPROM_MEMORIES_OFFSET = 0;
+constexpr size_t EEPROM_MEMORIES_BYTES = sizeof(long) * 10;
+constexpr size_t EEPROM_SETTINGS_OFFSET = EEPROM_MEMORIES_OFFSET + EEPROM_MEMORIES_BYTES;
+constexpr size_t EEPROM_METER_MODE_OFFSET = EEPROM_SETTINGS_OFFSET;
+constexpr size_t EEPROM_BRIGHTNESS_OFFSET = EEPROM_METER_MODE_OFFSET + sizeof(int);
+constexpr size_t EEPROM_INVERT_OFFSET = EEPROM_BRIGHTNESS_OFFSET + sizeof(int);
+constexpr size_t EEPROM_VOLT_CAL_OFFSET = EEPROM_INVERT_OFFSET + sizeof(bool);
+constexpr size_t EEPROM_VOLT_OFFSET_OFFSET = EEPROM_VOLT_CAL_OFFSET + sizeof(float);
 double vReal[SAMPLES];
 double vImag[SAMPLES];
 ArduinoFFT<double> FFT = ArduinoFFT<double>(vReal, vImag, SAMPLES, SAMPLERATE, true);
@@ -77,24 +86,24 @@ void applySiFreq(uint32_t freq) {
 
 void loadSettings() {
   for (int i = 0; i < 10; i++) {
-    EEPROM.get(i * sizeof(long), memories[i]);
+   EEPROM.get(EEPROM_MEMORIES_OFFSET + (i * sizeof(long)), memories[i]);
   }
-  EEPROM.get(40 * sizeof(int), meterMode);
-  EEPROM.get(41 * sizeof(int), brightnessLevel);
-  EEPROM.get(42 * sizeof(bool), invertMeter);
-  EEPROM.get(43 * sizeof(float), voltCalibration);
-  EEPROM.get(44 * sizeof(float), voltOffset);
+  EEPROM.get(EEPROM_METER_MODE_OFFSET, meterMode);
+  EEPROM.get(EEPROM_BRIGHTNESS_OFFSET, brightnessLevel);
+  EEPROM.get(EEPROM_INVERT_OFFSET, invertMeter);
+  EEPROM.get(EEPROM_VOLT_CAL_OFFSET, voltCalibration);
+  EEPROM.get(EEPROM_VOLT_OFFSET_OFFSET, voltOffset);
   if (brightnessLevel < 0 || brightnessLevel > 6) brightnessLevel = 4;
   if (meterMode < 0 || meterMode > 2) meterMode = 0;
   applyMeterDisplaySettings();
 }
 
 void saveSettings() {
-  EEPROM.put(40 * sizeof(int), meterMode);
-  EEPROM.put(41 * sizeof(int), brightnessLevel);
-  EEPROM.put(42 * sizeof(bool), invertMeter);
-  EEPROM.put(43 * sizeof(float), voltCalibration);
-  EEPROM.put(44 * sizeof(float), voltOffset);
+  EEPROM.put(EEPROM_METER_MODE_OFFSET, meterMode);
+  EEPROM.put(EEPROM_BRIGHTNESS_OFFSET, brightnessLevel);
+  EEPROM.put(EEPROM_INVERT_OFFSET, invertMeter);
+  EEPROM.put(EEPROM_VOLT_CAL_OFFSET, voltCalibration);
+  EEPROM.put(EEPROM_VOLT_OFFSET_OFFSET, voltOffset);
   EEPROM.commit();
 }
 
@@ -272,9 +281,9 @@ void setup() {
   applySiFreq(baseFreq);
 
   // Boot splash on meter
-  drawSplashScreen();
   bootTime = millis();
-  delay(2000); // Show splash 2s
+  drawSplashScreen();
+  delay(BOOT_SPLASH_MS); // Show splash 2s
 
   displayMain.setTextSize(1);
   displayMain.setTextColor(SSD1306_WHITE);
@@ -296,7 +305,7 @@ void loop() {
   if (pos != lastPos) {
     long d = pos - lastPos;
     lastPos = pos;
-    if (!menuActive && millis() > 3000) { // Ignore encoder during boot splash
+    if (!menuActive && millis() - bootTime > BOOT_SPLASH_MS) { // Ignore encoder during boot splash
       long step = stepSizes[stepIndex];
       long nf = (long)baseFreq + d * step;
       if (nf < 1500000L) nf = 1500000L;
@@ -321,7 +330,7 @@ void loop() {
       longPressHandled = false;
     }
     if (!longPressHandled && millis() - btnDown > 1000) { // Long press for menu/invert
-      if (!menuActive && millis() > 3000) {
+      if (!menuActive && millis() - bootTime > BOOT_SPLASH_MS) {
         menuActive = true;
         menuState = 1;
         menuSelection = 0;
@@ -339,7 +348,7 @@ void loop() {
     }
   } else {
     if (btnDown != 0 && !longPressHandled && millis() - btnDown < 1000) { // Short press
-      if (!menuActive && millis() > 3000) {
+      if (!menuActive && millis() - bootTime > BOOT_SPLASH_MS) {
         // Cycle meter modes (PDF function)
         meterMode = (meterMode + 1) % 3;
         saveSettings();
@@ -358,11 +367,12 @@ void loop() {
           menuActive = false;
           applySiFreq(baseFreq);
         } else if (menuState == 3) {
-          EEPROM.put(menuSelection * sizeof(long), baseFreq);
+          EEPROM.put(EEPROM_MEMORIES_OFFSET + (menuSelection * sizeof(long)), baseFreq);
+          EEPROM.commit();
           menuActive = false;
         } else if (menuState == 4) {
           long memFreq;
-          EEPROM.get(menuSelection * sizeof(long), memFreq);
+          EEPROM.get(EEPROM_MEMORIES_OFFSET + (menuSelection * sizeof(long)), memFreq);
           if (memFreq > 0) baseFreq = memFreq;
           menuActive = false;
           applySiFreq(baseFreq);
@@ -472,7 +482,7 @@ void loop() {
     displayMain.display();
 
     // Meter rendering per PDF
-    if (millis() < 2000) {
+    if (millis() - bootTime < BOOT_SPLASH_MS) {
       drawSplashScreen(); // Boot splash
     } else {
       switch (meterMode) {
