@@ -204,9 +204,6 @@ int meterNeedleX(float normalized, const int *positions, int count) {
 void drawDottedBand(int x0, int x1, int y, int spacing) {
   for (int x = x0; x <= x1; x += spacing) {
     displayMeter.drawPixel(x, y, SSD1306_WHITE);
-    if ((x & 1) == 0 && y + 1 < METER_H - 1) {
-      displayMeter.drawPixel(x, y + 1, SSD1306_WHITE);
-    }
   }
 }
 
@@ -230,11 +227,14 @@ void drawClassicMeterFace(const char* title, const char* valueText, const char* 
   const int pivotX = 12;
   const int pivotY = 28;
   int needleX = meterNeedleX(normalized, labelX, labelCount);
+  int needleTipLeftX = max(0, needleX - 1);
+  int needleTipRightX = min(METER_W - 1, needleX + 1);
 
   drawDottedBand(9, METER_W - 10, scaleY, 3);
-  displayMeter.drawLine(pivotX, pivotY, needleX, scaleY + 1, SSD1306_WHITE);
-  displayMeter.drawLine(pivotX + 1, pivotY - 1, needleX, scaleY, SSD1306_WHITE);
-  displayMeter.drawLine(pivotX - 1, pivotY - 1, needleX, scaleY, SSD1306_WHITE);
+  displayMeter.drawLine(pivotX, pivotY, needleX, scaleY, SSD1306_WHITE);
+  displayMeter.drawLine(pivotX, pivotY - 1, needleX, scaleY - 1, SSD1306_WHITE);
+  displayMeter.drawPixel(needleTipLeftX, scaleY - 1, SSD1306_WHITE);
+  displayMeter.drawPixel(needleTipRightX, scaleY - 1, SSD1306_WHITE);
   displayMeter.drawCircle(pivotX, pivotY, 2, SSD1306_WHITE);
   displayMeter.drawPixel(pivotX, pivotY, SSD1306_BLACK);
 
@@ -244,8 +244,8 @@ void drawClassicMeterFace(const char* title, const char* valueText, const char* 
     int tickBottom = (i == emphasisIndex) ? scaleY + 4 : scaleY + 2;
     displayMeter.drawLine(x, tickTop, x, tickBottom, SSD1306_WHITE);
     if (i == emphasisIndex) {
-      displayMeter.drawPixel(x - 1, scaleY - 4, SSD1306_WHITE);
-      displayMeter.drawPixel(x + 1, scaleY - 4, SSD1306_WHITE);
+      displayMeter.drawLine(x - 1, tickTop, x - 1, tickBottom, SSD1306_WHITE);
+      displayMeter.drawLine(x + 1, tickTop, x + 1, tickBottom, SSD1306_WHITE);
     }
 
     int16_t bx, by;
@@ -259,6 +259,7 @@ void drawClassicMeterFace(const char* title, const char* valueText, const char* 
 }
 
 void drawSMeter() {
+  // Cobra 148 GTL-style scale: S-units on the left, then +10/+20/+30 over S9.
   const char* rxLabels[8] = {"S1", "S3", "S5", "S7", "S9", "+10", "+20", "+30"};
   const char* txLabels[8] = {"0", "1", "2", "3", "4", "5", "7", "10"};
   const int labelX[8] = {8, 23, 38, 53, 68, 84, 100, 116};
