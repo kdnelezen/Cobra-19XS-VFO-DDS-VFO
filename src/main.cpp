@@ -67,7 +67,7 @@ bool menuActive = false;
 int menuState = 0; // 0: normal, 1: main menu, 2: mode sub, 3: save mem sub, 4: load mem sub, 5: meter sub, 6: meter mode sub
 int menuSelection = 0;
 
-int meterMode = 0; // 0: S-Meter, 1: Voltmeter, 2: SWR
+int meterMode = 0; // 0: S-Meter, 1: Voltmeter, 2: SWR, 3: Preview
 int brightnessLevel = 4; // 0-6 (0=dim, 6=bright)
 bool invertMeter = false;
 float voltCalibration = 2.0f; // Default gain for a 2:1 divider
@@ -95,7 +95,7 @@ void loadSettings() {
   EEPROM.get(EEPROM_VOLT_CAL_OFFSET, voltCalibration);
   EEPROM.get(EEPROM_VOLT_OFFSET_OFFSET, voltOffset);
   if (brightnessLevel < 0 || brightnessLevel > 6) brightnessLevel = 4;
-  if (meterMode < 0 || meterMode > 2) meterMode = 0;
+  if (meterMode < 0 || meterMode > 3) meterMode = 0;
   if (!isfinite(voltCalibration) || voltCalibration < 0.5f || voltCalibration > 4.0f) voltCalibration = 2.0f;
   if (!isfinite(voltOffset) || voltOffset < -5.0f || voltOffset > 5.0f) voltOffset = 0.0f;
   applyMeterDisplaySettings();
@@ -304,6 +304,38 @@ void drawSWR() {
   drawClassicMeterFace("SWR", swrStr, labels, labelX, 6, normalized, -1);
 }
 
+void drawStatusPreview() {
+  displayMeter.clearDisplay();
+  displayMeter.drawRect(0, 0, METER_W, METER_H, SSD1306_WHITE);
+  displayMeter.setTextSize(1);
+  bool isTX = digitalRead(PTT_DETECT_PIN) == LOW;
+
+  displayMeter.setCursor(4, 1);
+  displayMeter.print("PREVIEW");
+
+  displayMeter.setCursor(78, 1);
+  displayMeter.print(isTX ? "TX" : "RX");
+
+  char freqText[20];
+  snprintf(freqText, sizeof(freqText), "FREQ %2lu.%03lu.%03lu", baseFreq / 1000000UL, (baseFreq / 1000UL) % 1000UL, baseFreq % 1000UL);
+  displayMeter.setCursor(4, 11);
+  displayMeter.print(freqText);
+
+  char stepText[8];
+  if (stepSizes[stepIndex] >= 1000) {
+    snprintf(stepText, sizeof(stepText), "%ldk", stepSizes[stepIndex] / 1000);
+  } else {
+    snprintf(stepText, sizeof(stepText), "%ld", stepSizes[stepIndex]);
+  }
+
+  char modeText[20];
+  snprintf(modeText, sizeof(modeText), "MODE %s STEP %s", modeNames[currentMode], stepText);
+  displayMeter.setCursor(4, 21);
+  displayMeter.print(modeText);
+
+  displayMeter.display();
+}
+
 void setup() {
   Serial.begin(115200);
   EEPROM.begin(512);
@@ -362,7 +394,7 @@ void loop() {
         case 1: case 5: menuSelection = constrain(menuSelection, 0, 4); break;
         case 2: menuSelection = constrain(menuSelection, 0, 3); break;
         case 3: case 4: menuSelection = constrain(menuSelection, 0, 9); break;
-        case 6: menuSelection = constrain(menuSelection, 0, 3); break;
+        case 6: menuSelection = constrain(menuSelection, 0, 4); break;
       }
     }
   }
@@ -433,7 +465,7 @@ void loop() {
             menuActive = false;
           }
         } else if (menuState == 6) {
-          if (menuSelection < 3) {
+          if (menuSelection < 4) {
             meterMode = menuSelection;
           }
           menuState = 5;
@@ -504,9 +536,9 @@ void loop() {
           displayMain.println(opts[i]);
         }
       } else if (menuState == 6) {
-        const char* opts[] = {"S-Meter", "Voltmeter", "SWR", "Back"};
+        const char* opts[] = {"S-Meter", "Voltmeter", "SWR", "Preview", "Back"};
         displayMain.println("Meter Mode:");
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < 5; i++) {
           displayMain.setCursor(0, 10 + i * 10);
           if (menuSelection == i) displayMain.print(">");
           displayMain.println(opts[i]);
@@ -556,6 +588,7 @@ void loop() {
      case 0: drawSMeter(); break;
      case 1: drawVoltmeter(); break;
      case 2: drawSWR(); break;
+     case 3: drawStatusPreview(); break;
     }
 
     lastDisplay = millis();
