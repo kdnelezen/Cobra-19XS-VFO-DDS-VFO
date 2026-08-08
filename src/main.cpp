@@ -67,11 +67,14 @@ bool menuActive = false;
 int menuState = 0; // 0: normal, 1: main menu, 2: mode sub, 3: save mem sub, 4: load mem sub, 5: meter sub, 6: meter mode sub
 int menuSelection = 0;
 
-int meterMode = 0; // 0: S-Meter, 1: Voltmeter, 2: SWR
+int meterMode = 0; // 0: S-Meter, 1: Voltmeter, 2: SWR, 3: Preview
 int brightnessLevel = 4; // 0-6 (0=dim, 6=bright)
 bool invertMeter = false;
 float voltCalibration = 2.0f; // Default gain for a 2:1 divider
 float voltOffset = 0.0;
+constexpr int METER_MENU_PREVIEW_INDEX = 3;
+constexpr int METER_MENU_BACK_INDEX = 4; // UI-only; not a persisted meter mode
+constexpr int METER_MENU_ITEM_COUNT = 5;
 
 void sampleFFT(uint8_t *outbins);
 void beepRoger(int ms);
@@ -95,7 +98,7 @@ void loadSettings() {
   EEPROM.get(EEPROM_VOLT_CAL_OFFSET, voltCalibration);
   EEPROM.get(EEPROM_VOLT_OFFSET_OFFSET, voltOffset);
   if (brightnessLevel < 0 || brightnessLevel > 6) brightnessLevel = 4;
-  if (meterMode < 0 || meterMode > 2) meterMode = 0;
+  if (meterMode < 0 || meterMode > METER_MENU_PREVIEW_INDEX) meterMode = 0; // Preview is persisted; Back is UI-only.
   if (!isfinite(voltCalibration) || voltCalibration < 0.5f || voltCalibration > 4.0f) voltCalibration = 2.0f;
   if (!isfinite(voltOffset) || voltOffset < -5.0f || voltOffset > 5.0f) voltOffset = 0.0f;
   applyMeterDisplaySettings();
@@ -201,7 +204,13 @@ int meterNeedleX(float normalized, const int *positions, int count) {
   return (int)(positions[idx] + (positions[idx + 1] - positions[idx]) * frac);
 }
 
-// Draws a Cobra-style meter face; pass -1 to disable emphasized tick marks.
+void drawDottedBand(int x0, int x1, int y, int spacing) {
+  for (int x = x0; x <= x1; x += spacing) {
+    displayMeter.drawPixel(x, y, SSD1306_WHITE);
+  }
+}
+
+// Draws a Cobra 148 GTL-inspired meter face; pass -1 to disable emphasized tick marks.
 void drawClassicMeterFace(const char* title, const char* valueText, const char* const* labels, const int* labelX, int labelCount, float normalized, int emphasisIndex) {
   displayMeter.clearDisplay();
   displayMeter.drawRect(0, 0, METER_W, METER_H, SSD1306_WHITE);
@@ -218,21 +227,28 @@ void drawClassicMeterFace(const char* title, const char* valueText, const char* 
 
   const int scaleY = 12;
   const int labelY = 21;
-  const int pivotX = 10;
+  const int pivotX = 12;
   const int pivotY = 28;
   int needleX = meterNeedleX(normalized, labelX, labelCount);
+  int needleTipLeftX = max(0, needleX - 1);
+  int needleTipRightX = min(METER_W - 1, needleX + 1);
 
-  displayMeter.drawLine(8, scaleY, METER_W - 8, scaleY, SSD1306_WHITE);
-  displayMeter.drawLine(pivotX, pivotY, needleX, scaleY - 1, SSD1306_WHITE);
-  displayMeter.drawCircle(pivotX, pivotY, 1, SSD1306_WHITE);
+  drawDottedBand(9, METER_W - 10, scaleY, 3);
+  displayMeter.drawLine(pivotX, pivotY, needleX, scaleY, SSD1306_WHITE);
+  displayMeter.drawLine(pivotX, pivotY - 1, needleX, scaleY - 1, SSD1306_WHITE);
+  displayMeter.drawPixel(needleTipLeftX, scaleY - 1, SSD1306_WHITE);
+  displayMeter.drawPixel(needleTipRightX, scaleY - 1, SSD1306_WHITE);
+  displayMeter.drawCircle(pivotX, pivotY, 2, SSD1306_WHITE);
+  displayMeter.drawPixel(pivotX, pivotY, SSD1306_BLACK);
 
   for (int i = 0; i < labelCount; i++) {
     int x = labelX[i];
-    displayMeter.drawLine(x, scaleY - 2, x, scaleY + 2, SSD1306_WHITE);
+    int tickTop = (i == emphasisIndex) ? scaleY - 5 : scaleY - 3;
+    int tickBottom = (i == emphasisIndex) ? scaleY + 4 : scaleY + 2;
+    displayMeter.drawLine(x, tickTop, x, tickBottom, SSD1306_WHITE);
     if (i == emphasisIndex) {
-      displayMeter.drawLine(x, scaleY - 4, x, scaleY + 4, SSD1306_WHITE);
-      displayMeter.drawLine(x - 1, scaleY - 4, x - 1, scaleY + 4, SSD1306_WHITE);
-      displayMeter.drawLine(x + 1, scaleY - 4, x + 1, scaleY + 4, SSD1306_WHITE);
+      displayMeter.drawLine(x - 1, tickTop, x - 1, tickBottom, SSD1306_WHITE);
+      displayMeter.drawLine(x + 1, tickTop, x + 1, tickBottom, SSD1306_WHITE);
     }
 
     int16_t bx, by;
@@ -246,7 +262,8 @@ void drawClassicMeterFace(const char* title, const char* valueText, const char* 
 }
 
 void drawSMeter() {
-  const char* rxLabels[8] = {"S1", "S3", "S5", "S7", "S9", "+20", "+40", "+60"};
+  // Cobra 148 GTL-style scale: S-units on the left, then +10/+20/+30 over S9.
+  const char* rxLabels[8] = {"S1", "S3", "S5", "S7", "S9", "+10", "+20", "+30"};
   const char* txLabels[8] = {"0", "1", "2", "3", "4", "5", "7", "10"};
   const int labelX[8] = {8, 23, 38, 53, 68, 84, 100, 116};
   bool isTX = digitalRead(PTT_DETECT_PIN) == LOW;
@@ -264,7 +281,7 @@ void drawSMeter() {
     snprintf(rxValueText, sizeof(rxValueText), "%s", rxLabels[rxIndex]);
     valueText = rxValueText;
   }
-  drawClassicMeterFace("COBRA 148", valueText, labels, labelX, 8, value, isTX ? -1 : METER_S9_INDEX);
+  drawClassicMeterFace("S/RF", valueText, labels, labelX, 8, value, isTX ? -1 : METER_S9_INDEX);
 }
 
 void drawVoltmeter() {
@@ -275,7 +292,7 @@ void drawVoltmeter() {
   const char* labels[6] = {"0", "3", "6", "9", "12", "15V"};
   const int labelX[6] = {8, 28, 48, 68, 88, 108};
   float normalized = constrain(voltage / 15.0f, 0.0f, 1.0f);
-  drawClassicMeterFace("COBRA 148", voltStr, labels, labelX, 6, normalized, -1);
+  drawClassicMeterFace("VOLTS", voltStr, labels, labelX, 6, normalized, -1);
 }
 
 void drawSWR() {
@@ -287,7 +304,41 @@ void drawSWR() {
   float normalized = constrain((swrValue - 1.0f) / 4.0f, 0.0f, 1.0f);
   char swrStr[6];
   dtostrf(swrValue, 3, 1, swrStr);
-  drawClassicMeterFace("COBRA 148", swrStr, labels, labelX, 6, normalized, -1);
+  drawClassicMeterFace("SWR", swrStr, labels, labelX, 6, normalized, -1);
+}
+
+void drawStatusPreview() {
+  displayMeter.clearDisplay();
+  displayMeter.drawRect(0, 0, METER_W, METER_H, SSD1306_WHITE);
+  displayMeter.setTextSize(1);
+  bool isTX = digitalRead(PTT_DETECT_PIN) == LOW;
+
+  displayMeter.setCursor(4, 1);
+  displayMeter.print("STATUS");
+
+  displayMeter.setCursor(78, 1);
+  displayMeter.print(isTX ? "TX" : "RX");
+
+  char freqText[32];
+  snprintf(freqText, sizeof(freqText), "FREQ %lu.%03lu MHz",
+           (unsigned long)(baseFreq / 1000000UL),
+           (unsigned long)((baseFreq / 1000UL) % 1000UL));
+  displayMeter.setCursor(4, 11);
+  displayMeter.print(freqText);
+
+  char stepText[16]; // Fits the current stepSizes[] range with the k suffix.
+  if (stepSizes[stepIndex] >= 1000) {
+    snprintf(stepText, sizeof(stepText), "%ldk", stepSizes[stepIndex] / 1000);
+  } else {
+    snprintf(stepText, sizeof(stepText), "%ld", stepSizes[stepIndex]);
+  }
+
+  char modeText[40]; // Enough for the current mode labels and step text.
+  snprintf(modeText, sizeof(modeText), "MODE %s STEP %s", modeNames[currentMode], stepText);
+  displayMeter.setCursor(4, 21);
+  displayMeter.print(modeText);
+
+  displayMeter.display();
 }
 
 void setup() {
@@ -348,7 +399,7 @@ void loop() {
         case 1: case 5: menuSelection = constrain(menuSelection, 0, 4); break;
         case 2: menuSelection = constrain(menuSelection, 0, 3); break;
         case 3: case 4: menuSelection = constrain(menuSelection, 0, 9); break;
-        case 6: menuSelection = constrain(menuSelection, 0, 3); break;
+        case 6: menuSelection = constrain(menuSelection, 0, METER_MENU_BACK_INDEX); break;
       }
     }
   }
@@ -419,8 +470,10 @@ void loop() {
             menuActive = false;
           }
         } else if (menuState == 6) {
-          if (menuSelection < 3) {
-            meterMode = menuSelection;
+          int selectedMeterMode = menuSelection;
+          menuSelection = 0;
+          if (selectedMeterMode != METER_MENU_BACK_INDEX) {
+            meterMode = selectedMeterMode;
           }
           menuState = 5;
         }
@@ -490,9 +543,9 @@ void loop() {
           displayMain.println(opts[i]);
         }
       } else if (menuState == 6) {
-        const char* opts[] = {"S-Meter", "Voltmeter", "SWR", "Back"};
+        const char* opts[] = {"S-Meter", "Voltmeter", "SWR", "Preview", "Back"};
         displayMain.println("Meter Mode:");
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < METER_MENU_ITEM_COUNT; i++) {
           displayMain.setCursor(0, 10 + i * 10);
           if (menuSelection == i) displayMain.print(">");
           displayMain.println(opts[i]);
@@ -542,6 +595,7 @@ void loop() {
      case 0: drawSMeter(); break;
      case 1: drawVoltmeter(); break;
      case 2: drawSWR(); break;
+     case 3: drawStatusPreview(); break;
     }
 
     lastDisplay = millis();

@@ -9,6 +9,7 @@ ESP32-based digital VFO, meter, and menu firmware for a Cobra 19XS-style radio.
 - Dual OLED support:
   - 128x64 main frequency screen
   - 128x32 Cobra-style meter screen
+- Separate preview/status screen for quick-glance frequency and mode info
 - Encoder menu, memory slots, meter modes, and voltage calibration
 
 ## Project layout
@@ -43,9 +44,17 @@ AM   RX
 ### Meter screen
 
 ```text
-COBRA 148
-S1  S3  S5  S7  S9  +20  +40  +60
-needle-style analog meter face
+S/RF
+S1  S3  S5  S7  S9  +10  +20  +30
+pixel-dotted Cobra 148 GTL-style meter face
+```
+
+### Preview screen
+
+```text
+STATUS     RX
+FREQ 27.000 MHz
+MODE AM STEP 1k
 ```
 
 ## Controls
