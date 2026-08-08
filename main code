@@ -8,6 +8,7 @@
 #include <Encoder.h>
 #include <ArduinoFFT.h>
 #include <EEPROM.h>
+#include <math.h>
 
 #define MAIN_OLED_ADDR 0x3D
 #define METER_OLED_ADDR 0x3C
@@ -63,6 +64,9 @@ bool invertMeter = false;
 float voltCalibration = 3.3 / 4095.0 * 2.0; // Default for 2:1 divider (13.8V max)
 float voltOffset = 0.0;
 
+void sampleFFT(uint8_t *outbins);
+void beepRoger(int ms);
+
 void applySiFreq(uint32_t freq) {
   long finalHz = (long)freq + clarifier + modeOffsetHz[currentMode];
   if (finalHz < 1500000L) finalHz = 1500000L;
@@ -112,6 +116,16 @@ void calibrateVoltage() {
   while (digitalRead(ENC_BTN) == HIGH) delay(10);
   float adc138 = analogRead(VOLT_IN_PIN) * (3.3 / 4095.0);
   delay(500);
+
+  if (fabsf(adc138 - adc12) < 0.001f) {
+    displayMain.clearDisplay();
+    displayMain.setCursor(0, 0);
+    displayMain.println("Cal error");
+    displayMain.println("Retry volt cal");
+    displayMain.display();
+    delay(2000);
+    return;
+  }
 
   voltCalibration = (13.8 - 12.0) / (adc138 - adc12);
   voltOffset = 12.0 - (adc12 * voltCalibration);
@@ -227,6 +241,7 @@ void setup() {
 
 void loop() {
   static long lastPos = 0;
+  static bool longPressHandled = false;
   long pos = encoder.read() / 4;
   if (pos != lastPos) {
     long d = pos - lastPos;
@@ -251,8 +266,11 @@ void loop() {
   static unsigned long btnDown = 0;
   bool isPTT = digitalRead(PTT_DETECT_PIN) == LOW;
   if (digitalRead(ENC_BTN) == LOW) {
-    if (btnDown == 0) btnDown = millis();
-    if (millis() - btnDown > 1000) { // Long press for menu/invert
+    if (btnDown == 0) {
+      btnDown = millis();
+      longPressHandled = false;
+    }
+    if (!longPressHandled && millis() - btnDown > 1000) { // Long press for menu/invert
       if (!menuActive && millis() > 3000) {
         menuActive = true;
         menuState = 1;
@@ -267,10 +285,10 @@ void loop() {
         saveSettings();
         beepRoger(100);
       }
-      btnDown = millis() + 200;
+      longPressHandled = true;
     }
   } else {
-    if (btnDown != 0 && millis() - btnDown < 1000) { // Short press
+    if (btnDown != 0 && !longPressHandled && millis() - btnDown < 1000) { // Short press
       if (!menuActive && millis() > 3000) {
         // Cycle meter modes (PDF function)
         meterMode = (meterMode + 1) % 3;
@@ -318,12 +336,15 @@ void loop() {
           }
           menuSelection = 0;
         } else if (menuState == 6) {
-          meterMode = menuSelection % 3; // Exclude Back
+          if (menuSelection < 3) {
+            meterMode = menuSelection;
+          }
           menuState = 5;
         }
       }
     }
     btnDown = 0;
+    longPressHandled = false;
   }
 
   // PTT handling
