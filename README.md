@@ -1,77 +1,70 @@
 # Cobra-19XS-VFO-DDS-VFO
-This is a VFO for a Cobra 19XS radio. It can be used for any CB radio, if you have radio knowledge. 
-# ESP32 DDR VFO for Cobra 19XS
 
-This project integrates a digital VFO (Variable Frequency Oscillator) and S-meter display into a Cobra 19XS CB radio using an ESP32 microcontroller. The system provides precise frequency tuning, a digital S-meter, a voltmeter, and a user-friendly menu system via an OLED display.
+ESP32-based digital VFO, meter, and menu firmware for a Cobra 19XS-style radio.
 
-## Installation and Assembly Manual
+## What’s included
 
-⚠️ **Warning**: Modifying radio equipment can be dangerous and may cause permanent damage to the device. This guide is for informational purposes only. Do not attempt this unless you are experienced with radio electronics and soldering. Proceed at your own risk.
+- Flashable PlatformIO project
+- ESP32 Arduino firmware in `src/main.cpp`
+- Dual OLED support:
+  - 128x64 main frequency screen
+  - 128x32 Cobra-style meter screen
+- Encoder menu, memory slots, meter modes, and voltage calibration
 
-This section outlines the physical connections between your ESP32 circuit and the Cobra 19XS CB radio. All component identifications refer to the provided Cobra 19XS service manual and schematics.
+## Project layout
 
-### Pin-by-Pin Wiring Instructions
+- `platformio.ini` — build configuration
+- `src/main.cpp` — firmware source
+- `main code` — legacy source snapshot from the original upload
 
-**1. VFO (Si5351) Connection:**
-This is the most critical modification. The goal is to replace the radio's internal 16.725 MHz TX VCO and 16.27 MHz RX VCO.
+## Flashing
 
-* **ESP32 Pin:** Connect the output of your Si5351 to the input of the radio's mixer stage. Based on the block diagram and schematic, this signal goes to `IC203`.
-* **Cobra 19XS Connection Point:** Locate `IC203` on the main circuit board. You must desolder or carefully cut the trace from the original VCO to the pin on `IC203` that receives the VCO signal. Then, solder a shielded wire from your Si5351's `CLK0` output to this pin.
+1. Open the folder in VS Code with PlatformIO installed.
+2. Select the `esp32dev` environment.
+3. Build and upload.
 
-**2. S-Meter (`AUDIO_IN_PIN`) Connection:**
-This connection provides the voltage for the S-meter and AGC functions.
+Command line:
 
-* **ESP32 Pin:** `AUDIO_IN_PIN` (GPIO35).
-* **Cobra 19XS Connection Point:** Solder a wire to the cathode (the side with the line/band) of **diode D205**. Diode `D205` is located on the main schematic page near the RF amplifier stage, just before the `LEVEL METER` label. This point provides a rectified DC voltage proportional to the received signal strength.
+```bash
+pio run
+pio run -t upload
+```
 
-**3. PTT (`PTT_DETECT_PIN` & `PTT_KEY_PIN`) Connection:**
-This allows your ESP32 circuit to sense the PTT (Push-To-Talk) button and key the radio's transmitter.
+## Screen preview
 
-* **ESP32 Pins:**
-    * `PTT_DETECT_PIN` (GPIO34): This senses the PTT line's voltage level.
-    * `PTT_KEY_PIN` (GPIO26): This keys the transmitter by pulling the line to ground.
-* **Cobra 19XS Connection Point:** Solder wires from both ESP32 pins to **pin 4** of the microphone jack. Pin 4 is the PTT line on the microphone connector, which controls transistor `Q205` to key the radio.
+### Main screen
 
-**4. Voltmeter (`VOLT_IN_PIN`) Connection:**
-This provides the power source voltage for monitoring.
+```text
+27.000.000 MHz
+AM   RX
+^ step underline moves with the selected tuning step
+```
 
-* **ESP32 Pin:** `VOLT_IN_PIN` (GPIO36).
-* **Cobra 19XS Connection Point:** Solder a wire to the **red power cord lead** where it connects to the radio's circuit board. You must also connect your ESP32's **GND** to the radio's chassis ground.
-* **Additional Components:** You will need to build the voltage divider circuit as mentioned in the code's comments to safely step down the 12V supply for the ESP32's ADC input. This typically involves a resistor divider network.
+### Meter screen
 
-## Operation Manual
+```text
+COBRA 148
+S1  S3  S5  S7  S9  +20  +40  +60
+needle-style analog meter face
+```
 
-This section explains how to use your new ESP32 VFO and S-Meter circuit.
+## Controls
 
-### Basic Operation
+- Short press encoder: cycle meter mode
+- Long press encoder: open menu
+- Encoder rotation: tune or navigate menus
+- Long press from main screen: toggle meter invert
 
-* **Frequency Control:** Turn the encoder knob to change the frequency. The step size is controlled by a short press of the encoder button.
-* **Frequency Step:** Short-press the encoder button to cycle through the available step sizes: 1, 10, 100, 1000, and 10000 Hz. The display will show an underline below the digit being adjusted.
-* **Frequency and Mode Display:** The main OLED screen shows the current frequency in MHz, the selected mode (AM, USB, LSB, CW), and the current state (TX/RX).
+## Wiring notes
 
-### Menu Navigation
+- Si5351 CLK0 -> radio mixer/VFO injection point
+- GPIO35 -> audio/S-meter tap
+- GPIO34 / GPIO26 -> PTT detect/key
+- GPIO36 -> voltage divider input
+- Shared ground is required
 
-A long press (1 second or more) on the encoder button will enter the main menu. Turn the encoder to scroll through the menu options. Short-press the button to select an item.
+## Notes
 
-* **Mode:** Allows you to change between AM, USB, LSB, and CW.
-* **Save Mem:** Saves the current frequency to a memory slot (0-9).
-* **Load Mem:** Loads a saved frequency from a memory slot (0-9).
-* **Meter:** Accesses the sub-menu for meter settings.
-
-### Meter Functions
-
-The smaller meter display can show three different types of information. A short press of the encoder button (while not in the menu) will cycle through these modes.
-
-1.  **S-Meter:** The default mode shows a visual representation of the received signal strength, with labels from S1 to S9 and beyond.
-2.  **Voltmeter:** Displays the real-time voltage of the radio's power supply. This is particularly useful for mobile operation.
-3.  **SWR Meter:** While the code's SWR function is a placeholder, it shows a visual bar to indicate relative SWR. The code's comment indicates that the radio's native SWR meter is recommended for more accurate readings.
-
-### Meter Settings Menu
-
-Within the main menu, selecting the "Meter" option will open a sub-menu with the following options:
-
-* **Mode Sel:** Allows you to manually select the meter mode (S-Meter, Voltmeter, SWR).
-* **Bright:** Adjusts the brightness of the meter display.
-* **Invert:** Inverts the colors of the meter display (black-on-white vs. white-on-black). This setting is also accessible with a long-press of the encoder button from the main screen.
-* **Cal Volt:** Initiates the voltage calibration routine. Follow the on-screen instructions to calibrate the voltmeter using known voltage sources.
-* **Back:** Returns to the main menu.
+- This firmware is written for an ESP32 Dev Module target.
+- The voltage input must be scaled with a proper divider before connecting to GPIO36.
+- Radio modifications should only be done by experienced users.
