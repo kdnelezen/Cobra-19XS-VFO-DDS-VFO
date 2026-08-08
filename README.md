@@ -43,9 +43,9 @@ AM   RX
 ### Meter screen
 
 ```text
-COBRA 148
-S1  S3  S5  S7  S9  +20  +40  +60
-needle-style analog meter face
+S/RF
+S1  S3  S5  S7  S9  +10  +20  +30
+pixel-dotted Cobra 148 GTL-style meter face
 ```
 
 ## Controls

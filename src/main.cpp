@@ -201,7 +201,16 @@ int meterNeedleX(float normalized, const int *positions, int count) {
   return (int)(positions[idx] + (positions[idx + 1] - positions[idx]) * frac);
 }
 
-// Draws a Cobra-style meter face; pass -1 to disable emphasized tick marks.
+void drawDottedBand(int x0, int x1, int y, int spacing) {
+  for (int x = x0; x <= x1; x += spacing) {
+    displayMeter.drawPixel(x, y, SSD1306_WHITE);
+    if ((x & 1) == 0 && y + 1 < METER_H - 1) {
+      displayMeter.drawPixel(x, y + 1, SSD1306_WHITE);
+    }
+  }
+}
+
+// Draws a Cobra 148 GTL-inspired meter face; pass -1 to disable emphasized tick marks.
 void drawClassicMeterFace(const char* title, const char* valueText, const char* const* labels, const int* labelX, int labelCount, float normalized, int emphasisIndex) {
   displayMeter.clearDisplay();
   displayMeter.drawRect(0, 0, METER_W, METER_H, SSD1306_WHITE);
@@ -218,21 +227,25 @@ void drawClassicMeterFace(const char* title, const char* valueText, const char* 
 
   const int scaleY = 12;
   const int labelY = 21;
-  const int pivotX = 10;
+  const int pivotX = 12;
   const int pivotY = 28;
   int needleX = meterNeedleX(normalized, labelX, labelCount);
 
-  displayMeter.drawLine(8, scaleY, METER_W - 8, scaleY, SSD1306_WHITE);
-  displayMeter.drawLine(pivotX, pivotY, needleX, scaleY - 1, SSD1306_WHITE);
-  displayMeter.drawCircle(pivotX, pivotY, 1, SSD1306_WHITE);
+  drawDottedBand(9, METER_W - 10, scaleY, 3);
+  displayMeter.drawLine(pivotX, pivotY, needleX, scaleY + 1, SSD1306_WHITE);
+  displayMeter.drawLine(pivotX + 1, pivotY - 1, needleX, scaleY, SSD1306_WHITE);
+  displayMeter.drawLine(pivotX - 1, pivotY - 1, needleX, scaleY, SSD1306_WHITE);
+  displayMeter.drawCircle(pivotX, pivotY, 2, SSD1306_WHITE);
+  displayMeter.drawPixel(pivotX, pivotY, SSD1306_BLACK);
 
   for (int i = 0; i < labelCount; i++) {
     int x = labelX[i];
-    displayMeter.drawLine(x, scaleY - 2, x, scaleY + 2, SSD1306_WHITE);
+    int tickTop = (i == emphasisIndex) ? scaleY - 5 : scaleY - 3;
+    int tickBottom = (i == emphasisIndex) ? scaleY + 4 : scaleY + 2;
+    displayMeter.drawLine(x, tickTop, x, tickBottom, SSD1306_WHITE);
     if (i == emphasisIndex) {
-      displayMeter.drawLine(x, scaleY - 4, x, scaleY + 4, SSD1306_WHITE);
-      displayMeter.drawLine(x - 1, scaleY - 4, x - 1, scaleY + 4, SSD1306_WHITE);
-      displayMeter.drawLine(x + 1, scaleY - 4, x + 1, scaleY + 4, SSD1306_WHITE);
+      displayMeter.drawPixel(x - 1, scaleY - 4, SSD1306_WHITE);
+      displayMeter.drawPixel(x + 1, scaleY - 4, SSD1306_WHITE);
     }
 
     int16_t bx, by;
@@ -246,7 +259,7 @@ void drawClassicMeterFace(const char* title, const char* valueText, const char* 
 }
 
 void drawSMeter() {
-  const char* rxLabels[8] = {"S1", "S3", "S5", "S7", "S9", "+20", "+40", "+60"};
+  const char* rxLabels[8] = {"S1", "S3", "S5", "S7", "S9", "+10", "+20", "+30"};
   const char* txLabels[8] = {"0", "1", "2", "3", "4", "5", "7", "10"};
   const int labelX[8] = {8, 23, 38, 53, 68, 84, 100, 116};
   bool isTX = digitalRead(PTT_DETECT_PIN) == LOW;
@@ -264,7 +277,7 @@ void drawSMeter() {
     snprintf(rxValueText, sizeof(rxValueText), "%s", rxLabels[rxIndex]);
     valueText = rxValueText;
   }
-  drawClassicMeterFace("COBRA 148", valueText, labels, labelX, 8, value, isTX ? -1 : METER_S9_INDEX);
+  drawClassicMeterFace("S/RF", valueText, labels, labelX, 8, value, isTX ? -1 : METER_S9_INDEX);
 }
 
 void drawVoltmeter() {
@@ -275,7 +288,7 @@ void drawVoltmeter() {
   const char* labels[6] = {"0", "3", "6", "9", "12", "15V"};
   const int labelX[6] = {8, 28, 48, 68, 88, 108};
   float normalized = constrain(voltage / 15.0f, 0.0f, 1.0f);
-  drawClassicMeterFace("COBRA 148", voltStr, labels, labelX, 6, normalized, -1);
+  drawClassicMeterFace("VOLTS", voltStr, labels, labelX, 6, normalized, -1);
 }
 
 void drawSWR() {
@@ -287,7 +300,7 @@ void drawSWR() {
   float normalized = constrain((swrValue - 1.0f) / 4.0f, 0.0f, 1.0f);
   char swrStr[6];
   dtostrf(swrValue, 3, 1, swrStr);
-  drawClassicMeterFace("COBRA 148", swrStr, labels, labelX, 6, normalized, -1);
+  drawClassicMeterFace("SWR", swrStr, labels, labelX, 6, normalized, -1);
 }
 
 void setup() {
