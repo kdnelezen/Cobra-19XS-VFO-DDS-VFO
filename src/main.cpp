@@ -72,6 +72,9 @@ int brightnessLevel = 4; // 0-6 (0=dim, 6=bright)
 bool invertMeter = false;
 float voltCalibration = 2.0f; // Default gain for a 2:1 divider
 float voltOffset = 0.0;
+constexpr int METER_MENU_PREVIEW_INDEX = 3;
+constexpr int METER_MENU_BACK_INDEX = 4; // UI-only; not a persisted meter mode
+constexpr int METER_MENU_ITEM_COUNT = 5;
 
 void sampleFFT(uint8_t *outbins);
 void beepRoger(int ms);
@@ -95,7 +98,7 @@ void loadSettings() {
   EEPROM.get(EEPROM_VOLT_CAL_OFFSET, voltCalibration);
   EEPROM.get(EEPROM_VOLT_OFFSET_OFFSET, voltOffset);
   if (brightnessLevel < 0 || brightnessLevel > 6) brightnessLevel = 4;
-  if (meterMode < 0 || meterMode > 3) meterMode = 0;
+  if (meterMode < 0 || meterMode > METER_MENU_PREVIEW_INDEX) meterMode = 0; // Preview is persisted; Back is UI-only.
   if (!isfinite(voltCalibration) || voltCalibration < 0.5f || voltCalibration > 4.0f) voltCalibration = 2.0f;
   if (!isfinite(voltOffset) || voltOffset < -5.0f || voltOffset > 5.0f) voltOffset = 0.0f;
   applyMeterDisplaySettings();
@@ -311,24 +314,26 @@ void drawStatusPreview() {
   bool isTX = digitalRead(PTT_DETECT_PIN) == LOW;
 
   displayMeter.setCursor(4, 1);
-  displayMeter.print("PREVIEW");
+  displayMeter.print("STATUS");
 
   displayMeter.setCursor(78, 1);
   displayMeter.print(isTX ? "TX" : "RX");
 
-  char freqText[20];
-  snprintf(freqText, sizeof(freqText), "FREQ %2lu.%03lu.%03lu", baseFreq / 1000000UL, (baseFreq / 1000UL) % 1000UL, baseFreq % 1000UL);
+  char freqText[32];
+  snprintf(freqText, sizeof(freqText), "FREQ %lu.%03lu MHz",
+           (unsigned long)(baseFreq / 1000000UL),
+           (unsigned long)((baseFreq / 1000UL) % 1000UL));
   displayMeter.setCursor(4, 11);
   displayMeter.print(freqText);
 
-  char stepText[8];
+  char stepText[16]; // Fits the current stepSizes[] range with the k suffix.
   if (stepSizes[stepIndex] >= 1000) {
     snprintf(stepText, sizeof(stepText), "%ldk", stepSizes[stepIndex] / 1000);
   } else {
     snprintf(stepText, sizeof(stepText), "%ld", stepSizes[stepIndex]);
   }
 
-  char modeText[20];
+  char modeText[40]; // Enough for the current mode labels and step text.
   snprintf(modeText, sizeof(modeText), "MODE %s STEP %s", modeNames[currentMode], stepText);
   displayMeter.setCursor(4, 21);
   displayMeter.print(modeText);
@@ -394,7 +399,7 @@ void loop() {
         case 1: case 5: menuSelection = constrain(menuSelection, 0, 4); break;
         case 2: menuSelection = constrain(menuSelection, 0, 3); break;
         case 3: case 4: menuSelection = constrain(menuSelection, 0, 9); break;
-        case 6: menuSelection = constrain(menuSelection, 0, 4); break;
+        case 6: menuSelection = constrain(menuSelection, 0, METER_MENU_BACK_INDEX); break;
       }
     }
   }
@@ -465,8 +470,10 @@ void loop() {
             menuActive = false;
           }
         } else if (menuState == 6) {
-          if (menuSelection < 4) {
-            meterMode = menuSelection;
+          int selectedMeterMode = menuSelection;
+          menuSelection = 0;
+          if (selectedMeterMode != METER_MENU_BACK_INDEX) {
+            meterMode = selectedMeterMode;
           }
           menuState = 5;
         }
@@ -538,7 +545,7 @@ void loop() {
       } else if (menuState == 6) {
         const char* opts[] = {"S-Meter", "Voltmeter", "SWR", "Preview", "Back"};
         displayMain.println("Meter Mode:");
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < METER_MENU_ITEM_COUNT; i++) {
           displayMain.setCursor(0, 10 + i * 10);
           if (menuSelection == i) displayMain.print(">");
           displayMain.println(opts[i]);

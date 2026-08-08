@@ -52,8 +52,8 @@ pixel-dotted Cobra 148 GTL-style meter face
 ### Preview screen
 
 ```text
-PREVIEW    RX
-FREQ 27.000.000
+STATUS     RX
+FREQ 27.000 MHz
 MODE AM STEP 1k
 ```
 
