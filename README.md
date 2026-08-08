@@ -50,10 +50,11 @@ needle-style analog meter face
 
 ## Controls
 
-- Short press encoder: cycle meter mode
+- Short press encoder: cycle tuning step
 - Long press encoder: open menu
 - Encoder rotation: tune or navigate menus
 - Long press from main screen: toggle meter invert
+- Meter mode, brightness, invert, and voltage calibration are in the Meter menu
 
 ## Wiring notes
 
