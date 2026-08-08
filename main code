@@ -148,6 +148,8 @@ void drawSplashScreen() {
   displayMeter.display();
 }
 
+const int METER_S9_INDEX = 4;
+
 int meterNeedleX(float normalized, const int *positions, int count) {
   if (count <= 1) return positions[0];
   if (normalized <= 0.0f) return positions[0];
@@ -158,7 +160,8 @@ int meterNeedleX(float normalized, const int *positions, int count) {
   return (int)(positions[idx] + (positions[idx + 1] - positions[idx]) * frac);
 }
 
-void drawClassicMeterFace(const char* title, const char* valueText, const char* const* labels, const int* labelX, int labelCount, float normalized) {
+// Draws a Cobra-style meter face; pass -1 to disable emphasized tick marks.
+void drawClassicMeterFace(const char* title, const char* valueText, const char* const* labels, const int* labelX, int labelCount, float normalized, int emphasisIndex) {
   displayMeter.clearDisplay();
   displayMeter.drawRect(0, 0, METER_W, METER_H, SSD1306_WHITE);
   displayMeter.setTextSize(1);
@@ -185,7 +188,8 @@ void drawClassicMeterFace(const char* title, const char* valueText, const char* 
   for (int i = 0; i < labelCount; i++) {
     int x = labelX[i];
     displayMeter.drawLine(x, scaleY - 2, x, scaleY + 2, SSD1306_WHITE);
-    if (i == 4) {
+    if (i == emphasisIndex) {
+      displayMeter.drawLine(x, scaleY - 4, x, scaleY + 4, SSD1306_WHITE);
       displayMeter.drawLine(x - 1, scaleY - 4, x - 1, scaleY + 4, SSD1306_WHITE);
       displayMeter.drawLine(x + 1, scaleY - 4, x + 1, scaleY + 4, SSD1306_WHITE);
     }
@@ -201,34 +205,48 @@ void drawClassicMeterFace(const char* title, const char* valueText, const char* 
 }
 
 void drawSMeter() {
-  const char* labels[8] = {"S1", "S3", "S5", "S7", "S9", "+20", "+40", "+60"};
+  const char* rxLabels[8] = {"S1", "S3", "S5", "S7", "S9", "+20", "+40", "+60"};
+  const char* txLabels[8] = {"0", "1", "2", "3", "4", "5", "7", "10"};
   const int labelX[8] = {8, 23, 38, 53, 68, 84, 100, 116};
   bool isTX = digitalRead(PTT_DETECT_PIN) == LOW;
   float value = analogRead(AUDIO_IN_PIN) / 4095.0f;
-  value = sqrtf(value);
-  const char* valueText = isTX ? "TX PWR" : "RX";
-  drawClassicMeterFace("COBRA 148", valueText, labels, labelX, 8, value);
+  const char* valueText = "";
+  char txValueText[12];
+  char rxValueText[8];
+  const char* const* labels = rxLabels;
+  if (isTX) {
+    snprintf(txValueText, sizeof(txValueText), "PWR %d%%", (int)roundf(value * 100.0f));
+    valueText = txValueText;
+    labels = txLabels;
+  } else {
+    int rxIndex = constrain((int)roundf(value * 7.0f), 0, 7);
+    snprintf(rxValueText, sizeof(rxValueText), "%s", rxLabels[rxIndex]);
+    valueText = rxValueText;
+  }
+  drawClassicMeterFace("COBRA 148", valueText, labels, labelX, 8, value, isTX ? -1 : METER_S9_INDEX);
 }
 
 void drawVoltmeter() {
   float rawVolt = analogRead(VOLT_IN_PIN) * (3.3 / 4095.0);
   float voltage = rawVolt * voltCalibration + voltOffset;
-  char voltStr[6];
+  char voltStr[8];
   dtostrf(voltage, 4, 1, voltStr);
   const char* labels[6] = {"0", "3", "6", "9", "12", "15V"};
-  const int labelX[6] = {8, 28, 48, 68, 88, 116};
+  const int labelX[6] = {8, 28, 48, 68, 88, 108};
   float normalized = constrain(voltage / 15.0f, 0.0f, 1.0f);
-  drawClassicMeterFace("COBRA 148", voltStr, labels, labelX, 6, normalized);
+  drawClassicMeterFace("COBRA 148", voltStr, labels, labelX, 6, normalized, -1);
 }
 
 void drawSWR() {
   const char* labels[6] = {"1", "1.5", "2", "3", "4", "5"};
-  const int labelX[6] = {8, 28, 48, 68, 88, 116};
-  float dummySWR = map(analogRead(AUDIO_IN_PIN), 0, 4095, 10, 50) / 10.0f;
-  float normalized = constrain((dummySWR - 1.0f) / 4.0f, 0.0f, 1.0f);
+  const int labelX[6] = {8, 28, 48, 68, 88, 108};
+  // Approximate SWR using the available audio tap until a dedicated SWR input is added.
+  long swrX10 = map(constrain(analogRead(AUDIO_IN_PIN), 0, 4095), 0, 4095, 10, 50);
+  float swrValue = swrX10 / 10.0f;
+  float normalized = constrain((swrValue - 1.0f) / 4.0f, 0.0f, 1.0f);
   char swrStr[6];
-  dtostrf(dummySWR, 3, 1, swrStr);
-  drawClassicMeterFace("COBRA 148", swrStr, labels, labelX, 6, normalized);
+  dtostrf(swrValue, 3, 1, swrStr);
+  drawClassicMeterFace("COBRA 148", swrStr, labels, labelX, 6, normalized, -1);
 }
 
 void setup() {
