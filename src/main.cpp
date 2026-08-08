@@ -36,6 +36,15 @@ Encoder encoder(ENC_A, ENC_B);
 
 #define SAMPLES 256
 #define SAMPLERATE 8000
+constexpr unsigned long BOOT_SPLASH_MS = 2000;
+constexpr size_t EEPROM_MEMORIES_OFFSET = 0;
+constexpr size_t EEPROM_MEMORIES_BYTES = sizeof(long) * 10;
+constexpr size_t EEPROM_SETTINGS_OFFSET = EEPROM_MEMORIES_OFFSET + EEPROM_MEMORIES_BYTES;
+constexpr size_t EEPROM_METER_MODE_OFFSET = EEPROM_SETTINGS_OFFSET;
+constexpr size_t EEPROM_BRIGHTNESS_OFFSET = EEPROM_METER_MODE_OFFSET + sizeof(int);
+constexpr size_t EEPROM_INVERT_OFFSET = EEPROM_BRIGHTNESS_OFFSET + sizeof(int);
+constexpr size_t EEPROM_VOLT_CAL_OFFSET = EEPROM_INVERT_OFFSET + sizeof(bool);
+constexpr size_t EEPROM_VOLT_OFFSET_OFFSET = EEPROM_VOLT_CAL_OFFSET + sizeof(float);
 double vReal[SAMPLES];
 double vImag[SAMPLES];
 ArduinoFFT<double> FFT = ArduinoFFT<double>(vReal, vImag, SAMPLES, SAMPLERATE, true);
@@ -50,7 +59,7 @@ const char* modeNames[4] = {"AM", "USB", "LSB", "CW"};
 
 unsigned long lastDisplay = 0;
 const unsigned long DISPLAY_INTERVAL = 80;
-unsigned long bootTime = 0;
+bool encoderPrimed = false;
 
 long memories[10] = {0};
 
@@ -61,11 +70,13 @@ int menuSelection = 0;
 int meterMode = 0; // 0: S-Meter, 1: Voltmeter, 2: SWR
 int brightnessLevel = 4; // 0-6 (0=dim, 6=bright)
 bool invertMeter = false;
-float voltCalibration = 3.3 / 4095.0 * 2.0; // Default for 2:1 divider (13.8V max)
+float voltCalibration = 2.0f; // Default gain for a 2:1 divider
 float voltOffset = 0.0;
 
 void sampleFFT(uint8_t *outbins);
 void beepRoger(int ms);
+void applyMeterDisplaySettings();
+bool waitForEncoderButtonPress(unsigned long timeoutMs);
 
 void applySiFreq(uint32_t freq) {
   long finalHz = (long)freq + clarifier + modeOffsetHz[currentMode];
@@ -76,27 +87,42 @@ void applySiFreq(uint32_t freq) {
 
 void loadSettings() {
   for (int i = 0; i < 10; i++) {
-    EEPROM.get(i * sizeof(long), memories[i]);
+   EEPROM.get(EEPROM_MEMORIES_OFFSET + (i * sizeof(long)), memories[i]);
   }
-  EEPROM.get(40 * sizeof(int), meterMode);
-  EEPROM.get(41 * sizeof(int), brightnessLevel);
-  EEPROM.get(42 * sizeof(bool), invertMeter);
-  EEPROM.get(43 * sizeof(float), voltCalibration);
-  EEPROM.get(44 * sizeof(float), voltOffset);
+  EEPROM.get(EEPROM_METER_MODE_OFFSET, meterMode);
+  EEPROM.get(EEPROM_BRIGHTNESS_OFFSET, brightnessLevel);
+  EEPROM.get(EEPROM_INVERT_OFFSET, invertMeter);
+  EEPROM.get(EEPROM_VOLT_CAL_OFFSET, voltCalibration);
+  EEPROM.get(EEPROM_VOLT_OFFSET_OFFSET, voltOffset);
   if (brightnessLevel < 0 || brightnessLevel > 6) brightnessLevel = 4;
   if (meterMode < 0 || meterMode > 2) meterMode = 0;
-  displayMeter.invertDisplay(invertMeter);
-  displayMeter.ssd1306_command(SSD1306_SETCONTRAST);
-  displayMeter.ssd1306_command(map(brightnessLevel, 0, 6, 0, 255));
+  if (!isfinite(voltCalibration) || voltCalibration < 0.5f || voltCalibration > 4.0f) voltCalibration = 2.0f;
+  if (!isfinite(voltOffset) || voltOffset < -5.0f || voltOffset > 5.0f) voltOffset = 0.0f;
+  applyMeterDisplaySettings();
 }
 
 void saveSettings() {
-  EEPROM.put(40 * sizeof(int), meterMode);
-  EEPROM.put(41 * sizeof(int), brightnessLevel);
-  EEPROM.put(42 * sizeof(bool), invertMeter);
-  EEPROM.put(43 * sizeof(float), voltCalibration);
-  EEPROM.put(44 * sizeof(float), voltOffset);
+  EEPROM.put(EEPROM_METER_MODE_OFFSET, meterMode);
+  EEPROM.put(EEPROM_BRIGHTNESS_OFFSET, brightnessLevel);
+  EEPROM.put(EEPROM_INVERT_OFFSET, invertMeter);
+  EEPROM.put(EEPROM_VOLT_CAL_OFFSET, voltCalibration);
+  EEPROM.put(EEPROM_VOLT_OFFSET_OFFSET, voltOffset);
   EEPROM.commit();
+}
+
+bool waitForEncoderButtonPress(unsigned long timeoutMs) {
+  unsigned long start = millis();
+  while (digitalRead(ENC_BTN) == HIGH) {
+    if (millis() - start >= timeoutMs) return false;
+    delay(10);
+  }
+  return true;
+}
+
+void applyMeterDisplaySettings() {
+  displayMeter.invertDisplay(invertMeter);
+  displayMeter.ssd1306_command(SSD1306_SETCONTRAST);
+  displayMeter.ssd1306_command(map(brightnessLevel, 0, 6, 0, 255));
 }
 
 void calibrateVoltage() {
@@ -106,14 +132,29 @@ void calibrateVoltage() {
   displayMain.println("Calibrate Volt:");
   displayMain.println("Set 12.0V, press btn");
   displayMain.display();
-  while (digitalRead(ENC_BTN) == HIGH) delay(10);
+  if (!waitForEncoderButtonPress(30000UL)) {
+    displayMain.clearDisplay();
+    displayMain.setCursor(0, 0);
+    displayMain.println("Cal timeout");
+    displayMain.display();
+    delay(2000);
+    return;
+  }
   float adc12 = analogRead(VOLT_IN_PIN) * (3.3 / 4095.0);
   delay(500);
 
   displayMain.clearDisplay();
+  displayMain.setCursor(0, 0);
   displayMain.println("Set 13.8V, press btn");
   displayMain.display();
-  while (digitalRead(ENC_BTN) == HIGH) delay(10);
+  if (!waitForEncoderButtonPress(30000UL)) {
+    displayMain.clearDisplay();
+    displayMain.setCursor(0, 0);
+    displayMain.println("Cal timeout");
+    displayMain.display();
+    delay(2000);
+    return;
+  }
   float adc138 = analogRead(VOLT_IN_PIN) * (3.3 / 4095.0);
   delay(500);
 
@@ -252,11 +293,11 @@ void drawSWR() {
 void setup() {
   Serial.begin(115200);
   EEPROM.begin(512);
-  loadSettings();
   Wire.begin(SDA_PIN, SCL_PIN);
   delay(50);
   if (!displayMain.begin(SSD1306_SWITCHCAPVCC, MAIN_OLED_ADDR)) Serial.println("Main display init failed");
   if (!displayMeter.begin(SSD1306_SWITCHCAPVCC, METER_OLED_ADDR)) Serial.println("Meter display init failed");
+  loadSettings();
   pinMode(ENC_BTN, INPUT_PULLUP);
   pinMode(PTT_DETECT_PIN, INPUT);
   pinMode(PTT_KEY_PIN, OUTPUT);
@@ -268,8 +309,7 @@ void setup() {
 
   // Boot splash on meter
   drawSplashScreen();
-  bootTime = millis();
-  delay(2000); // Show splash 2s
+  delay(BOOT_SPLASH_MS); // Show splash 2s
 
   displayMain.setTextSize(1);
   displayMain.setTextColor(SSD1306_WHITE);
@@ -287,21 +327,26 @@ void setup() {
 void loop() {
   static long lastPos = 0;
   static bool longPressHandled = false;
+  if (!encoderPrimed) {
+    lastPos = encoder.read() / 4;
+    encoderPrimed = true;
+  }
   long pos = encoder.read() / 4;
   if (pos != lastPos) {
     long d = pos - lastPos;
     lastPos = pos;
-    if (!menuActive && millis() > 3000) { // Ignore encoder during boot splash
+    if (!menuActive) {
       long step = stepSizes[stepIndex];
       long nf = (long)baseFreq + d * step;
       if (nf < 1500000L) nf = 1500000L;
       if (nf > 55000000L) nf = 55000000L;
       baseFreq = nf;
       applySiFreq(baseFreq);
-    } else if (menuActive) {
+    } else {
       menuSelection += d;
       switch (menuState) {
-        case 1: case 2: case 5: menuSelection = constrain(menuSelection, 0, 4); break;
+        case 1: case 5: menuSelection = constrain(menuSelection, 0, 4); break;
+        case 2: menuSelection = constrain(menuSelection, 0, 3); break;
         case 3: case 4: menuSelection = constrain(menuSelection, 0, 9); break;
         case 6: menuSelection = constrain(menuSelection, 0, 3); break;
       }
@@ -315,8 +360,8 @@ void loop() {
       btnDown = millis();
       longPressHandled = false;
     }
-    if (!longPressHandled && millis() - btnDown > 1000) { // Long press for menu/invert
-      if (!menuActive && millis() > 3000) {
+    if (!longPressHandled && millis() - btnDown > 1000) { // Long press for menu
+      if (!menuActive) {
         menuActive = true;
         menuState = 1;
         menuSelection = 0;
@@ -324,22 +369,16 @@ void loop() {
       } else if (menuActive && menuState == 1 && menuSelection == 4) {
         menuActive = false;
         beepRoger(60);
-      } else if (!menuActive) {
-        invertMeter = !invertMeter;
-        displayMeter.invertDisplay(invertMeter);
-        saveSettings();
-        beepRoger(100);
       }
       longPressHandled = true;
     }
   } else {
     if (btnDown != 0 && !longPressHandled && millis() - btnDown < 1000) { // Short press
-      if (!menuActive && millis() > 3000) {
-        // Cycle meter modes (PDF function)
-        meterMode = (meterMode + 1) % 3;
-        saveSettings();
+      if (!menuActive) {
+        // Cycle tuning step on short press
+        stepIndex = (stepIndex + 1) % 5;
         beepRoger(40);
-      } else if (menuActive) {
+      } else {
         // Menu actions (as before)
         if (menuState == 1) {
           if (menuSelection == 0) menuState = 2; // Mode
@@ -353,11 +392,12 @@ void loop() {
           menuActive = false;
           applySiFreq(baseFreq);
         } else if (menuState == 3) {
-          EEPROM.put(menuSelection * sizeof(long), baseFreq);
+          EEPROM.put(EEPROM_MEMORIES_OFFSET + (menuSelection * sizeof(long)), baseFreq);
+          EEPROM.commit();
           menuActive = false;
         } else if (menuState == 4) {
           long memFreq;
-          EEPROM.get(menuSelection * sizeof(long), memFreq);
+          EEPROM.get(EEPROM_MEMORIES_OFFSET + (menuSelection * sizeof(long)), memFreq);
           if (memFreq > 0) baseFreq = memFreq;
           menuActive = false;
           applySiFreq(baseFreq);
@@ -367,19 +407,17 @@ void loop() {
             menuSelection = meterMode;
           } else if (menuSelection == 1) {
             brightnessLevel = (brightnessLevel + 1) % 7; // PDF: 7 steps
-            displayMeter.ssd1306_command(SSD1306_SETCONTRAST);
-            displayMeter.ssd1306_command(map(brightnessLevel, 0, 6, 0, 255));
+            applyMeterDisplaySettings();
             saveSettings();
           } else if (menuSelection == 2) {
             invertMeter = !invertMeter;
-            displayMeter.invertDisplay(invertMeter);
+            applyMeterDisplaySettings();
             saveSettings();
           } else if (menuSelection == 3) {
             calibrateVoltage();
           } else {
             menuActive = false;
           }
-          menuSelection = 0;
         } else if (menuState == 6) {
           if (menuSelection < 3) {
             meterMode = menuSelection;
@@ -392,23 +430,7 @@ void loop() {
     longPressHandled = false;
   }
 
-  // PTT handling
   digitalWrite(PTT_KEY_PIN, isPTT ? LOW : HIGH);
-  if (isPTT && !menuActive) {
-    uint8_t bins[SAMPLES / 2];
-    sampleFFT(bins);
-    displayMain.clearDisplay();
-    // Draw spectrum below frequency (shifted for space)
-    for (int i = 0; i < SAMPLES / 2; i++) {
-      int col = map(i, 0, SAMPLES / 2 - 1, 0, SCREEN_W - 1);
-      int intensity = min(15, (int)(bins[i] / 8));
-      for (int y = 0; y < intensity; y++) {
-        displayMain.drawPixel(col, 40 + y, SSD1306_WHITE); // Bottom half
-      }
-    }
-    displayMain.display();
-  }
-
   if (millis() - lastDisplay > DISPLAY_INTERVAL) {
     displayMain.clearDisplay();
     if (menuActive) {
@@ -422,6 +444,42 @@ void loop() {
           displayMain.setCursor(0, 10 + i * 10);
           if (menuSelection == i) displayMain.print(">");
           displayMain.println(opts[i]);
+        }
+      } else if (menuState == 2) {
+        const char* opts[] = {"AM", "USB", "LSB", "CW"};
+        displayMain.println("Mode:");
+        for (int i = 0; i < 4; i++) {
+          displayMain.setCursor(0, 10 + i * 10);
+          if (menuSelection == i) displayMain.print(">");
+          displayMain.println(opts[i]);
+        }
+      } else if (menuState == 3) {
+        displayMain.println("Save Mem:");
+        for (int i = 0; i < 5; i++) {
+          displayMain.setCursor(0, 10 + i * 10);
+          if (menuSelection == i) displayMain.print(">");
+          displayMain.print("M");
+          displayMain.println(i);
+        }
+        for (int i = 5; i < 10; i++) {
+          displayMain.setCursor(64, 10 + (i - 5) * 10);
+          if (menuSelection == i) displayMain.print(">");
+          displayMain.print("M");
+          displayMain.println(i);
+        }
+      } else if (menuState == 4) {
+        displayMain.println("Load Mem:");
+        for (int i = 0; i < 5; i++) {
+          displayMain.setCursor(0, 10 + i * 10);
+          if (menuSelection == i) displayMain.print(">");
+          displayMain.print("M");
+          displayMain.println(i);
+        }
+        for (int i = 5; i < 10; i++) {
+          displayMain.setCursor(64, 10 + (i - 5) * 10);
+          if (menuSelection == i) displayMain.print(">");
+          displayMain.print("M");
+          displayMain.println(i);
         }
       } else if (menuState == 5) {
         const char* opts[] = {"Mode Sel", "Bright", "Invert", "Cal Volt", "Back"};
@@ -456,6 +514,7 @@ void loop() {
       displayMain.print(freqFine);
       displayMain.setCursor(110, 8);
       displayMain.print("MHz");
+      // Step markers map to 1 Hz, 10 Hz, 100 Hz, 1 kHz, and 10 kHz from right to left.
       int underlineX[] = {90, 84, 78, 60, 48};
       int underlineW[] = {6, 6, 6, 12, 12};
       displayMain.drawLine(underlineX[stepIndex], 16, underlineX[stepIndex] + underlineW[stepIndex], 16, SSD1306_WHITE);
@@ -464,18 +523,25 @@ void loop() {
       displayMain.print(modeNames[currentMode]);
       displayMain.setCursor(100, 24);
       displayMain.print(isPTT ? "TX" : "RX");
+      if (isPTT) {
+        uint8_t bins[SAMPLES / 2];
+        sampleFFT(bins);
+        const int spectrumBaseY = 55;
+        for (int i = 0; i < SAMPLES / 2; i++) {
+          int col = map(i, 0, SAMPLES / 2 - 1, 0, SCREEN_W - 1);
+          int intensity = min(15, (int)(bins[i] / 8));
+          for (int y = 0; y < intensity; y++) {
+            displayMain.drawPixel(col, spectrumBaseY - y, SSD1306_WHITE);
+          }
+        }
+      }
     }
     displayMain.display();
 
-    // Meter rendering per PDF
-    if (millis() < 2000) {
-      drawSplashScreen(); // Boot splash
-    } else {
-      switch (meterMode) {
-        case 0: drawSMeter(); break;
-        case 1: drawVoltmeter(); break;
-        case 2: drawSWR(); break;
-      }
+    switch (meterMode) {
+     case 0: drawSMeter(); break;
+     case 1: drawVoltmeter(); break;
+     case 2: drawSWR(); break;
     }
 
     lastDisplay = millis();
